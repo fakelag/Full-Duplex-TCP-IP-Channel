@@ -2,9 +2,9 @@
 
 A two directional TCP network channel written in C++ using WinAPI/WinSock.
 
-Features: 
-• Asynchronous socket processing between client & server
-• Configurable message handler implementation with bitbuffers
-• Automated packet deserialization and defragmentation
-• Server controlled tickrate
-• Single thread per channel
+Features: <br />
+• Asynchronous socket processing between client & server <br />
+• Configurable message handler implementation with bitbuffers <br />
+• Automated packet deserialization and defragmentation <br />
+• Server controlled tickrate <br />
+• Single thread per channel <br />
