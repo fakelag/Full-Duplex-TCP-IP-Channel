@@ -98,7 +98,7 @@ int main()
 	INetChannel* pNetChannel = NET_CreateChannel();
 	pNetChannel->SetMessageHandler( &NET_MessageHandlerFn );
 
-	while ( !pNetChannel->InitClient( g_szHostIP, IRC_DEFAULT_PORT ) )
+	while ( !pNetChannel->Connect( g_szHostIP, IRC_DEFAULT_PORT ) )
 		Sleep( 1000 );
 
 	printf( "Ok\n" );

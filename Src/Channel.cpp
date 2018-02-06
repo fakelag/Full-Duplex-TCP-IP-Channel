@@ -54,8 +54,8 @@ public:
 	CBaseNetChannel();
 	~CBaseNetChannel();
 
-	bool				InitClient( const char* pszHost, int nPort );
-	bool				InitServer( SOCKET hSocket, ServerConnectionNotifyFn pfnNotify );
+	bool				Connect( const char* pszHost, int nPort );
+	bool				InitFromSocket( SOCKET hSocket, ServerConnectionNotifyFn pfnNotify );
 
 	void				CloseConnection();
 
@@ -177,7 +177,7 @@ CBaseNetChannel::~CBaseNetChannel()
 	DeleteCriticalSection( &m_hRecvLock );
 }
 
-bool CBaseNetChannel::InitClient( const char* pszHost, int nPort )
+bool CBaseNetChannel::Connect( const char* pszHost, int nPort )
 {
 	m_nFlags = 0;
 	m_nLastPingCycle = 0;
@@ -214,7 +214,7 @@ bool CBaseNetChannel::InitClient( const char* pszHost, int nPort )
 	return true;
 }
 
-bool CBaseNetChannel::InitServer( SOCKET hSocket, ServerConnectionNotifyFn pfnNotify )
+bool CBaseNetChannel::InitFromSocket( SOCKET hSocket, ServerConnectionNotifyFn pfnNotify )
 {
 	m_nFlags = 0;
 	m_nLastPingCycle = 0;
@@ -417,7 +417,7 @@ bool CBaseNetChannel::Reconnect()
 	if ( m_hNetworkThread == INVALID_HANDLE_VALUE )
 	{
 		if ( !m_bIsServer )
-			return InitClient( m_szLastHostIP, m_nLastHostPort );
+			return Connect( m_szLastHostIP, m_nLastHostPort );
 	}
 
 	return false;
@@ -758,7 +758,7 @@ bool NET_ProcessListenSocket( const char* pszPort, int nTickRate, ServerConnecti
 		CBaseNetChannel* pNetChannel = ( CBaseNetChannel* ) NET_CreateChannel();
 		pNetChannel->SetTickRate( nTickRate );
 
-		if ( pNetChannel->InitServer( hClient, pfnNotify ) )
+		if ( pNetChannel->InitFromSocket( hClient, pfnNotify ) )
 			g_ListenChannels.insert( g_ListenChannels.end(), pNetChannel );
 
 		int c = g_ListenChannels.size();

@@ -67,7 +67,7 @@ class INetChannel
 {
 public:
 	~INetChannel() {};
-	virtual bool			InitClient( const char* pszHost, int nPort ) = 0;
+	virtual bool			Connect( const char* pszHost, int nPort ) = 0;
 	virtual void			Disconnect( const char* pszReason ) = 0;
 	virtual void			Transmit() = 0;
 	virtual bool			Reconnect() = 0;
