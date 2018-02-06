@@ -9,8 +9,6 @@
 #include "iostream"
 #endif
 
-#define PACKET_MANIFEST_SIZE 4
-
 INetMessage::INetMessage( INetChannel* pNetChannel )
 {
 	m_pNetChannel = pNetChannel;

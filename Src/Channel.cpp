@@ -271,9 +271,9 @@ void CBaseNetChannel::CloseConnection()
 	closesocket( m_hSocket );
 	m_hSocket = INVALID_SOCKET;
 
-	if ( GetThreadId( m_hNetworkThread ) != GetCurrentThreadId() )
+	if ( m_hNetworkThread != INVALID_HANDLE_VALUE )
 	{
-		if ( m_hNetworkThread != INVALID_HANDLE_VALUE )
+		if ( GetThreadId( m_hNetworkThread ) != GetCurrentThreadId() )
 		{
 			if ( WaitForSingleObject( m_hNetworkThread, 2000 ) == WAIT_TIMEOUT )
 				TerminateThread( m_hNetworkThread, 0 );
@@ -512,7 +512,7 @@ long CBaseNetChannel::RecvInternal( void* pBuf, unsigned long nSize )
 
 		/* DeSerialize */
 
-		char* pMessage = ( char* ) pData + PACKET_HEADER_LENGTH + 4;
+		char* pMessage = ( char* ) pData + PACKET_HEADER_LENGTH + PACKET_MANIFEST_SIZE;
 		INetMessage* pNetMessage = NULL;
 
 		switch ( nType )
@@ -610,7 +610,7 @@ void CBaseNetChannel::ProcessHandlerMessage( CNETHandlerMessage* pNetMessage )
 
 long CBaseNetChannel::ProcessPacketHeader( void* pBuf, unsigned long nSize, int* pType )
 {
-	if ( nSize < PACKET_HEADER_LENGTH + 4 )
+	if ( nSize < PACKET_HEADER_LENGTH + PACKET_MANIFEST_SIZE )
 		return -1;
 
 	long nIncomingAck = ( ( long* ) pBuf )[ 0 ];

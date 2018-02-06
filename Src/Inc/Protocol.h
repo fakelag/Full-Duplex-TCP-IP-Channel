@@ -35,4 +35,5 @@
 #define NET_TICKRATE_MAX		128
 #define NET_TICKRATE_MIN		2
 
-#define NET_BUFFER_SIZE 4098
+#define PACKET_MANIFEST_SIZE	( sizeof( long ) )
+#define NET_BUFFER_SIZE			4098
