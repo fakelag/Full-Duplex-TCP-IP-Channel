@@ -173,6 +173,16 @@ public:
 		m_MessageHandler = pfnHandler;
 	}
 
+	void				SetTransmissionProxy( OnDataTransmissionProgressFn pfnProxy )
+	{
+		m_TransmissionProxy = pfnProxy;
+	}
+
+	void				SetIntermediateProxy( INetIntermediateContext* pContext )
+	{
+		m_IntermediateProxy = pContext;
+	}
+
 protected:
 	long				ProcessIncoming();
 	long				ProcessOutgoing();
