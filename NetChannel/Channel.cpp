@@ -71,6 +71,28 @@ const char *inet_ntop( int af, const void *src, char *dst, socklen_t size )
 #define PACKET_HEADER_LENGTH		8
 #define PACKET_BACKUP_LENGTH		( NET_PAYLOAD_SIZE * 4 )
 #define PACKET_TRANSFER_MTU			1500
+
+DWORD WINAPI NET_ProcessSocket( LPVOID lp );
+
+class CCriticalSectionAutolock
+{
+public:
+	CCriticalSectionAutolock( void* hLock );
+	~CCriticalSectionAutolock();
+
+private:
+	void* m_hLock;
+};
+
+#define CRITICAL_SECTION_AUTOLOCK( hLock ) \
+CCriticalSectionAutolock CSAutoLock__##hLock##( &hLock );
+
+#define CRITICAL_SECTION_START( hLock ) \
+EnterCriticalSection( hLock );
+
+#define CRITICAL_SECTION_END( hLock ) \
+LeaveCriticalSection( hLock );
+
 class CNetMessageQueue
 {
 public:
