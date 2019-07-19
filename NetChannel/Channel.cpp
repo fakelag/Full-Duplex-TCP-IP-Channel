@@ -1266,8 +1266,7 @@ void NET_DestroyChannel( INetChannel* pNetChannel )
 	delete pNetChannel;
 }
 
-std::vector< CBaseNetChannel* > g_ListenChannels;
-bool NET_ProcessListenSocket( const char* pszPort, int nTickRate, ServerConnectionNotifyFn pfnNotify )
+bool NET_ProcessListenSocket( const char* pszPort, int nTickRate, ServerRunFrameFn pfnPerFrame, ServerConnectionNotifyFn pfnNotify, INetIntermediateContext* pContext )
 {
 	addrinfo hints;
 	addrinfo* info = NULL;
@@ -1303,6 +1302,13 @@ bool NET_ProcessListenSocket( const char* pszPort, int nTickRate, ServerConnecti
 
 	nTickRate = max( min( nTickRate, NET_TICKRATE_MAX ), NET_TICKRATE_MIN );
 
+	//NetSocketInfo_t nSocketInfo;
+	//nSocketInfo.m_nTickRate = nTickRate;
+	//nSocketInfo.m_pRunFrame = pfnPerFrame;
+
+	//DWORD dwNetworkThreadId;
+	//HANDLE hNetworkThread = CreateThread( NULL, NULL, &NET_ProcessServerSockets, &nSocketInfo, NULL, &dwNetworkThreadId );
+
 	while ( listen( hListenSocket, SOMAXCONN ) != SOCKET_ERROR )
 	{
 		SOCKET hClient = accept( hListenSocket, NULL, NULL );
@@ -1311,30 +1317,42 @@ bool NET_ProcessListenSocket( const char* pszPort, int nTickRate, ServerConnecti
 			continue;
 
 		CBaseNetChannel* pNetChannel = ( CBaseNetChannel* ) NET_CreateChannel();
+		pNetChannel->SetIntermediateProxy( pContext );
 		pNetChannel->SetTickRate( nTickRate );
 
-		if ( pNetChannel->InitFromSocket( hClient, pfnNotify ) )
+		if ( pNetChannel->InitFromSocket( hClient, 0, pfnNotify ) )
+		{
+			CRITICAL_SECTION_AUTOLOCK( g_hListenChannelLock );
 			g_ListenChannels.insert( g_ListenChannels.end(), pNetChannel );
+		}
+		else
+		{
+			CRITICAL_SECTION_AUTOLOCK( g_hListenChannelLock );
+			NET_DestroyChannel( pNetChannel );
+		}
 
+		{
+			CRITICAL_SECTION_AUTOLOCK( g_hListenChannelLock );
 		int c = g_ListenChannels.size();
 		for ( int i = c - 1; i >= 0; --i )
 		{
-			if ( !g_ListenChannels[ i ]->IsActiveSocket() )
-			{
+				if ( !g_ListenChannels[ i ]->IsConnected() )
 				NET_DestroyChannel( g_ListenChannels[ i ] );
-				g_ListenChannels.erase( g_ListenChannels.begin() + i );
 			}
 		}
 	}
 
+	//TerminateThread( hNetworkThread, 0 );
+
+	{
+		CRITICAL_SECTION_AUTOLOCK( g_hListenChannelLock );
 	int c = g_ListenChannels.size();
 	for ( int i = c - 1; i >= 0; --i )
-	{
-		g_ListenChannels[ i ]->CloseConnection();
 		NET_DestroyChannel( g_ListenChannels[ i ] );
+
+		g_ListenChannels.clear();
 	}
 
-	g_ListenChannels.clear();
 	closesocket( hListenSocket );
 	return true;
 }
