@@ -184,19 +184,20 @@ public:
 	}
 
 protected:
-	long				ProcessIncoming();
-	long				ProcessOutgoing();
+	long				ProcessTransmissions();
 
-	void				DisconnectInternal( const char* pszReason );
+	void				DisconnectInternal( CNETDisconnect* pNetDisconnect );
 	void				ProcessHandlerMessage( CNETHandlerMessage* pNetMessage );
 	long				ProcessPacketHeader( void* pBuf, unsigned long nSize, int* pType );
 	long				SendInternal( void* pBuf, unsigned long nSize );
-	long				RecvInternal( void* pBuf, unsigned long nSize );
+	long				RecvInternal( char** pBuf, unsigned long nSize );
 
 	bool				m_bIsServer;
 	int					m_nTickRate;
 	int					m_nTimeout;
 	int					m_nLastPingCycle;
+	bool				m_bIsActiveTransmission;
+	long				m_nTransmissionSequenceNr;
 	long				m_nOutgoingSequenceNr;
 	long				m_nIncomingSequenceNr;
 	long				m_nState;
