@@ -240,12 +240,15 @@ protected:
 CCriticalSectionAutolock::CCriticalSectionAutolock( void* hLock )
 {
 	m_hLock = hLock;
-	EnterCriticalSection( ( LPCRITICAL_SECTION ) m_hLock );
+
+	LPCRITICAL_SECTION pLock = ( LPCRITICAL_SECTION ) m_hLock;
+	EnterCriticalSection( pLock );
 }
 
 CCriticalSectionAutolock::~CCriticalSectionAutolock()
 {
-	LeaveCriticalSection( ( LPCRITICAL_SECTION ) m_hLock );
+	LPCRITICAL_SECTION pLock = ( LPCRITICAL_SECTION ) m_hLock;
+	LeaveCriticalSection( pLock );
 }
 
 CNetMessageQueue::CNetMessageQueue( INetChannel* pNetChannel )
