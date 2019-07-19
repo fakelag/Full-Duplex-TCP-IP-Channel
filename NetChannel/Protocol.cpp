@@ -178,24 +178,27 @@ void CNETHandlerMessage::ProcessMessage()
 
 int CCLCConnect::Serialize( void* pBuf, unsigned long nSize )
 {
-	void* pData = CreateManifest( pBuf, nSize );
+	long* pData = ( long* ) CreateManifest( pBuf, nSize );
 
 	if ( !pData )
 		return -1;
 
-	( ( char* ) pData )[ 0 ] = 'h';
-	return PACKET_MANIFEST_SIZE + sizeof( char );
+	if ( nSize < PACKET_MANIFEST_SIZE + ( sizeof( long ) * 2 ) )
+		return -1;
+
+	pData[ 0 ] = m_ProtocolHeader;
+	pData[ 1 ] = m_ProtocolUid;
+
+	return PACKET_MANIFEST_SIZE + ( sizeof( long ) * 2 );
 }
 
 bool CCLCConnect::DeSerialize( void* pBuf, unsigned long nSize )
 {
-	if ( nSize != PACKET_MANIFEST_SIZE + sizeof( char ) )
+	if ( nSize > PACKET_MANIFEST_SIZE + ( sizeof( long ) * 2 ) )
 		return false;
 
-	m_Msg = *( char* ) pBuf;
-
-	if ( m_Msg != 'h' )
-		return false;
+	m_ProtocolHeader		= ( ( long* ) pBuf )[ 0 ];
+	m_ProtocolUid			= ( ( long* ) pBuf )[ 1 ];
 
 	return true;
 }
@@ -207,7 +210,7 @@ void CCLCConnect::ProcessMessage()
 
 int CSVCConnect::Serialize( void* pBuf, unsigned long nSize )
 {
-	void* pData = CreateManifest( pBuf, nSize );
+	long* pData = ( long* ) CreateManifest( pBuf, nSize );
 
 	if ( !pData )
 		return -1;
@@ -217,7 +220,7 @@ int CSVCConnect::Serialize( void* pBuf, unsigned long nSize )
 	if ( pNetChannel )
 		m_nTickrate = pNetChannel->GetTickRate();
 
-	( ( long* ) pData )[ 0 ] = m_nTickrate;
+	pData[ 0 ] = m_nTickrate;
 	return PACKET_MANIFEST_SIZE + sizeof( long );
 }
 
@@ -234,6 +237,6 @@ void CSVCConnect::ProcessMessage()
 {
 	INetChannel* pNetChannel = GetChannel();
 
-	if( pNetChannel )
+	if ( pNetChannel )
 		pNetChannel->SetTickRate( m_nTickrate );
 }
