@@ -25,11 +25,14 @@ std::vector< chat_client_t >	g_Clients;
 void UTIL_ConsoleClearWindow();
 void UTIL_ConsoleClearLine();
 
-void NET_MessageHandlerFn( INetChannel* pNetChannel, CNETHandlerMessage* pNetMessage )
+void NET_MessageHandlerFn( INetChannel* pNetChannel, INetMessage* pNetMessage )
 {
 	CRITICAL_SECTION_AUTOLOCK( g_hClientLock );
 
-	bf_read& stream = pNetMessage->InitReader();
+	if ( pNetMessage->GetType() != net_HandlerMsg )
+		return;
+
+	bf_read& stream = ( ( CNETHandlerMessage* ) pNetMessage )->GetRead();
 	unsigned char nCommand = stream.ReadByte();
 
 	switch ( nCommand )
@@ -78,7 +81,7 @@ void NET_MessageHandlerFn( INetChannel* pNetChannel, CNETHandlerMessage* pNetMes
 					snprintf( szLine, sizeof( szLine ), "%s connected.\n", g_Clients[ nConnectedClient ].m_szUsername );
 
 					CNETHandlerMessage* pChatMessage = new CNETHandlerMessage( g_Clients[ i ].m_pNetChannel );
-					bf_write& stream = pChatMessage->InitWriter();
+					bf_write& stream = pChatMessage->GetWrite();
 
 					stream.WriteByte( 0 );
 					stream.WriteString( szLine );
@@ -126,7 +129,7 @@ void NET_MessageHandlerFn( INetChannel* pNetChannel, CNETHandlerMessage* pNetMes
 					continue;
 
 				CNETHandlerMessage* pChatMessage = new CNETHandlerMessage( g_Clients[ i ].m_pNetChannel );
-				bf_write& stream = pChatMessage->InitWriter();
+				bf_write& stream = pChatMessage->GetWrite();
 
 				stream.WriteByte( 0 );
 				stream.WriteString( szLine );
@@ -200,7 +203,7 @@ bool NET_ClientNotifyFn( INetChannel* pNetChannel, int nState )
 				snprintf( szLine, sizeof( szLine ), "%s disconnected (%s)\n", g_Clients[ nClientIndex ].m_szUsername, pNetChannel->GetDisconnectReason() );
 
 				CNETHandlerMessage* pChatMessage = new CNETHandlerMessage( g_Clients[ i ].m_pNetChannel );
-				bf_write& stream = pChatMessage->InitWriter();
+				bf_write& stream = pChatMessage->GetWrite();
 
 				stream.WriteByte( 0 );
 				stream.WriteString( szLine );
@@ -273,7 +276,7 @@ DWORD WINAPI ConsoleThread( LPVOID lp )
 			for ( int i = 0; i < c; ++i )
 			{
 				CNETHandlerMessage* pChatMessage = new CNETHandlerMessage( g_Clients[ i ].m_pNetChannel );
-				bf_write& stream = pChatMessage->InitWriter();
+				bf_write& stream = pChatMessage->GetWrite();
 
 				stream.WriteByte( 0 );
 				stream.WriteString( szLine );
@@ -358,7 +361,7 @@ int main()
 	printf( "Port=%s, Tickrate=%i\n", IRC_DEFAULT_PORT, IRC_DEFAULT_TICKRATE );
 	printf( "Awaiting clients...\n" );
 
-	NET_ProcessListenSocket( IRC_DEFAULT_PORT, IRC_DEFAULT_TICKRATE, &NET_ClientNotifyFn );
+	NET_ProcessListenSocket( IRC_DEFAULT_PORT, IRC_DEFAULT_TICKRATE, NULL, &NET_ClientNotifyFn );
 
 	NET_Shutdown();
 

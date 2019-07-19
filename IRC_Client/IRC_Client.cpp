@@ -16,9 +16,12 @@ void UTIL_ConsoleClearWindow();
 
 #define IRC_DEFAULT_PORT 920
 
-void NET_MessageHandlerFn( INetChannel* pNetChannel, CNETHandlerMessage* pNetMessage )
+void NET_MessageHandlerFn( INetChannel* pNetChannel, INetMessage* pNetMessage )
 {
-	bf_read& stream = pNetMessage->InitReader();
+	if ( pNetMessage->GetType() != net_HandlerMsg )
+		return;
+
+	bf_read& stream = ( ( CNETHandlerMessage* ) pNetMessage )->GetRead();
 
 	switch ( stream.ReadByte() )
 	{
@@ -64,7 +67,7 @@ DWORD WINAPI ClientConsoleFn( LPVOID lp )
 				else
 				{
 					CNETHandlerMessage* pNetMessage = new CNETHandlerMessage( pNetChannel );
-					bf_write& stream = pNetMessage->InitWriter();
+					bf_write& stream = pNetMessage->GetWrite();
 
 					stream.WriteByte( 1 );
 					stream.WriteString( szCommand );
@@ -104,7 +107,7 @@ int main()
 	printf( "Ok\n" );
 
 	CNETHandlerMessage* pClientHello = new CNETHandlerMessage( pNetChannel );
-	bf_write& stream = pClientHello->InitWriter();
+	bf_write& stream = pClientHello->GetWrite();
 
 	stream.WriteByte( 0 );
 	stream.WriteString( g_szClientName );
@@ -148,7 +151,7 @@ int main()
 			if ( nConnectionCount != 0 )
 			{
 				CNETHandlerMessage* pClientHello = new CNETHandlerMessage( pNetChannel );
-				bf_write& stream = pClientHello->InitWriter();
+				bf_write& stream = pClientHello->GetWrite();
 
 				stream.WriteByte( 0 );
 				stream.WriteString( g_szClientName );
