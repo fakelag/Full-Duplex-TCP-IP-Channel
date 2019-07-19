@@ -93,6 +93,13 @@ EnterCriticalSection( hLock );
 #define CRITICAL_SECTION_END( hLock ) \
 LeaveCriticalSection( hLock );
 
+enum channel_state_t
+{
+	NET_IDLE,
+	NET_SENDING,
+	NET_RECEIVING
+};
+
 class CNetMessageQueue
 {
 public:
