@@ -18,28 +18,28 @@ INetMessage::INetMessage( INetChannel* pNetChannel )
 
 int CNETPing::Serialize( void* pBuf, unsigned long nSize )
 {
-	void* pData = CreateManifest( pBuf, nSize );
+	long* pData = ( long* ) CreateManifest( pBuf, nSize );
 
 	if ( !pData )
 		return -1;
 
-	int nSequenceNr = 0;
+	m_nSequenceNr = 0;
 
 	INetChannel* pNetChannel = GetChannel();
 
 	if ( pNetChannel )
-		nSequenceNr = pNetChannel->GetIncomingSequenceNr();
+		m_nSequenceNr = pNetChannel->GetIncomingSequenceNr();
 
-	( ( int* ) pData )[ 0 ] = nSequenceNr;
-	return PACKET_MANIFEST_SIZE + sizeof( int );
+	pData[ 0 ] = m_nSequenceNr;
+	return PACKET_MANIFEST_SIZE + sizeof( long );
 }
 
 bool CNETPing::DeSerialize( void* pBuf, unsigned long nSize )
 {
-	if ( nSize != PACKET_MANIFEST_SIZE + sizeof( int ) )
+	if ( nSize != PACKET_MANIFEST_SIZE + sizeof( long ) )
 		return false;
 
-	m_nSequenceNr = *( int* ) pBuf;
+	m_nSequenceNr = *( long* ) pBuf;
 	return true;
 }
 
