@@ -153,6 +153,21 @@ public:
 	void				SetFlags( unsigned long nFlags )	{ m_nFlags = nFlags; }
 	void				SetState( channel_state_t nState )	{ m_nState = nState;}
 
+	bool				IsActiveSocket() const
+	{
+		if ( m_hNetworkThread == INVALID_HANDLE_VALUE )
+			return false;
+
+		DWORD dwExitCode = 0;
+		if ( !GetExitCodeThread( m_hNetworkThread, &dwExitCode ) )
+			return false;
+
+		if ( dwExitCode != STILL_ACTIVE )
+			return false;
+
+		return true;
+	}
+
 	void				SetMessageHandler( OnHandlerMessageReceivedFn pfnHandler )
 	{
 		m_MessageHandler = pfnHandler;
