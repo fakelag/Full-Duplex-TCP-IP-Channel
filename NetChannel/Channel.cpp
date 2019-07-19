@@ -3,7 +3,6 @@
 #endif
 
 #include "windows.h"
-#include "ws2tcpip.h"
 #include "vector"
 
 #include "Inc\Channel.h"
