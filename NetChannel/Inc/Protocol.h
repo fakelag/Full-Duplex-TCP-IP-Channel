@@ -24,7 +24,7 @@
 #define net_Ping			( 1 << 16 )
 #define net_Disconnect		( 1 << 17 )
 #define net_HandlerMsg		( 1 << 18 )
-/* #define net_Reserved		( 1 << 19 )	*/
+#define net_Transfer		( 1 << 19 )
 /* #define net_Reserved		( 1 << 20 )	*/
 /* #define net_Reserved		( 1 << 21 )	*/
 /* #define net_Reserved		( 1 << 22 )	*/
