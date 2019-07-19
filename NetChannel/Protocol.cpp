@@ -62,7 +62,7 @@ CNETDisconnect::CNETDisconnect( INetChannel* pNetChannel, const char* pszReason 
 
 int CNETDisconnect::Serialize( void* pBuf, unsigned long nSize )
 {
-	void* pData = CreateManifest( pBuf, nSize );
+	char* pData = ( char* ) CreateManifest( pBuf, nSize );
 
 	if ( !pData )
 		return -1;
@@ -71,9 +71,9 @@ int CNETDisconnect::Serialize( void* pBuf, unsigned long nSize )
 		return -1;
 
 	int nStringLength = strlen( m_szDisconnectReason );
-	strncpy( ( char* ) pData, m_szDisconnectReason, nStringLength );
+	strncpy( pData, m_szDisconnectReason, nStringLength );
 
-	( ( char* ) pData + nStringLength )[ 0 ] = '\0';
+	pData[ nStringLength ] = '\0';
 	return PACKET_MANIFEST_SIZE + nStringLength + sizeof( char );
 }
 
@@ -93,7 +93,9 @@ void CNETDisconnect::ProcessMessage()
 	INetChannel* pNetChannel = GetChannel();
 
 	if ( pNetChannel )
-		pNetChannel->DisconnectInternal( m_szDisconnectReason );
+		pNetChannel->DisconnectInternal( this );
+}
+
 }
 
 int CNETHandlerMessage::Serialize( void* pBuf, unsigned long nSize )
