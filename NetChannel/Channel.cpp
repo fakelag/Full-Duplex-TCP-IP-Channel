@@ -84,7 +84,7 @@ enum channel_state_t
 class CNetMessageQueue
 {
 public:
-	CNetMessageQueue();
+	CNetMessageQueue( INetChannel* pNetChannel );
 	~CNetMessageQueue();
 	void							AddMessage( INetMessage* pNetMessage );
 	void							ProcessMessages();
@@ -93,6 +93,7 @@ public:
 
 	int								GetMessageCount()				const { return m_Queue.size(); }
 	INetMessage*					GetMessageByIndex( int nMsg )	const { return m_Queue[ nMsg ]; }
+	void							RemoveMessage( int nMsg )		{ m_Queue.erase( m_Queue.begin() + nMsg ); }
 
 	void							LockQueue()
 	{
@@ -107,6 +108,7 @@ public:
 private:
 	std::vector< INetMessage* >		m_Queue;
 	CRITICAL_SECTION				m_hQueueLock;
+	INetChannel*					m_pChannel;
 };
 
 class CBaseNetChannel : public INetChannel
@@ -202,9 +204,10 @@ CCriticalSectionAutolock::~CCriticalSectionAutolock()
 	LeaveCriticalSection( ( LPCRITICAL_SECTION ) m_hLock );
 }
 
-CNetMessageQueue::CNetMessageQueue()
+CNetMessageQueue::CNetMessageQueue( INetChannel* pNetChannel )
 {
 	InitializeCriticalSection( &m_hQueueLock );
+	m_pChannel = pNetChannel;
 }
 
 CNetMessageQueue::~CNetMessageQueue()
@@ -713,7 +716,14 @@ void CNetMessageQueue::ProcessMessages()
 	int c = m_Queue.size();
 
 	for ( int i = 0; i < c; ++i )
+	{
 		m_Queue[ i ]->ProcessMessage();
+
+		/* We might disconnect while processing a handler message */
+		/* Make sure we are still connected to continue processing messages */
+		if ( !m_pChannel->IsConnected() )
+			break;
+	}
 }
 
 void CNetMessageQueue::ReleaseQueue()
