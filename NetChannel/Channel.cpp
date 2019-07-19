@@ -1238,20 +1238,36 @@ bool NET_StartUp()
 	if ( WSAStartup( MAKEWORD( 2, 2 ), &wsaData ) )
 		return false;
 
+	InitializeCriticalSection( &g_hListenChannelLock );
+
 #ifdef NET_NOTIFY_THREADLOCK
 	InitializeCriticalSection( &g_hNotificationLock );
 #endif
 
+	g_bIsNetInitialized = true;
 	return true;
 }
 
 void NET_Shutdown()
 {
+	{
+		CRITICAL_SECTION_AUTOLOCK( g_hListenChannelLock );
+		int c = g_ListenChannels.size();
+		for ( int i = c - 1; i >= 0; --i )
+			NET_DestroyChannel( g_ListenChannels[ i ] );
+
+		g_ListenChannels.clear();
+	}
+
 	WSACleanup();
+
+	DeleteCriticalSection( &g_hListenChannelLock );
 
 #ifdef NET_NOTIFY_THREADLOCK
 	DeleteCriticalSection( &g_hNotificationLock );
 #endif
+
+	g_bIsNetInitialized = false;
 }
 
 INetChannel* NET_CreateChannel()
@@ -1262,6 +1278,16 @@ INetChannel* NET_CreateChannel()
 
 void NET_DestroyChannel( INetChannel* pNetChannel )
 {
+	{
+		CRITICAL_SECTION_AUTOLOCK( g_hListenChannelLock );
+		int c = g_ListenChannels.size();
+		for ( int i = c - 1; i >= 0; --i )
+		{
+			if ( g_ListenChannels[ i ]->GetSocket() == pNetChannel->GetSocket() )
+				g_ListenChannels.erase( g_ListenChannels.begin() + i );
+		}
+	}
+
 	static_cast< CBaseNetChannel* >( pNetChannel )->CloseConnection();
 	delete pNetChannel;
 }
