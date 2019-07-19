@@ -63,7 +63,7 @@ class bf_read
 {
 public:
 
-	void				Init( void *pData, int nBytes )				{ m_pData = (unsigned char *) pData; m_nDataBytes = nBytes; m_nCurByte = 0; }
+	void				Init( const void *pData, int nBytes )		{ m_pData = (unsigned char *) pData; m_nDataBytes = nBytes; m_nCurByte = 0; }
 	void				Reset()										{ m_nCurByte = 0; }
 	char				ReadChar()									{ char ret = *(char *) ( m_pData + m_nCurByte ); m_nCurByte += 1; return ret; }
 	unsigned char		ReadByte()									{ unsigned char ret = *(unsigned char *) ( m_pData + m_nCurByte ); m_nCurByte += 1; return ret; }

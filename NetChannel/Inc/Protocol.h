@@ -24,16 +24,19 @@
 #define net_Ping			( 1 << 16 )
 #define net_Disconnect		( 1 << 17 )
 #define net_HandlerMsg		( 1 << 18 )
-/* #define net_Reserved		( 1 << 19 )	*/
+#define net_Transfer		( 1 << 19 )
 /* #define net_Reserved		( 1 << 20 )	*/
 /* #define net_Reserved		( 1 << 21 )	*/
 /* #define net_Reserved		( 1 << 22 )	*/
 /* #define net_Reserved		( 1 << 23 )	*/
 /* #define net_Reserved		( 1 << 24 )	*/
 
-#define NET_TICKRATE_DEFAULT	32
-#define NET_TICKRATE_MAX		128
-#define NET_TICKRATE_MIN		2
+#define NET_TICKRATE_DEFAULT		32
+#define NET_TICKRATE_MAX			128
+#define NET_TICKRATE_MIN			2
 
-#define PACKET_MANIFEST_SIZE	( sizeof( long ) )
-#define NET_BUFFER_SIZE			4098
+#define PACKET_MANIFEST_SIZE		( ( long ) sizeof( long ) )
+#define NET_PAYLOAD_SIZE			4098
+#define NET_PROTOCOL_VERSION		22
+#define NET_PROTOCOL_MASK			0x200
+#define NET_PROTOCOL_UID			0xA5D2

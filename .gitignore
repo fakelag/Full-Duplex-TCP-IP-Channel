@@ -1,8 +1,10 @@
 */.vs/*
 .vs/*
+/Bin/Debug/*
 *.pdb
 *.ilk
 *.iobj
+*.ipdb
 *.obj
 *.idb
 *.lastbuildstate
