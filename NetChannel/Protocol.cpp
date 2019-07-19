@@ -9,6 +9,8 @@
 #include "iostream"
 #endif
 
+#define MSG_TRANSMISSION_HEADER_SIZE ( sizeof( long ) * 3 )
+
 INetMessage::INetMessage( INetChannel* pNetChannel )
 {
 	m_pNetChannel = pNetChannel;
