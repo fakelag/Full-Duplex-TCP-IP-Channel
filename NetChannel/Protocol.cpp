@@ -160,10 +160,11 @@ int CNETHandlerMessage::Serialize( void* pBuf, unsigned long nSize )
 
 bool CNETHandlerMessage::DeSerialize( void* pBuf, unsigned long nSize )
 {
-	if ( nSize > PACKET_MANIFEST_SIZE + NET_BUFFER_SIZE )
+	if ( nSize > PACKET_MANIFEST_SIZE + NET_PAYLOAD_SIZE )
 		return false;
 
-	memcpy( m_Data, pBuf, min( NET_BUFFER_SIZE, nSize ) );
+	m_nLength = nSize - PACKET_MANIFEST_SIZE;
+	memcpy( m_Data, pBuf, m_nLength );
 	return true;
 }
 
