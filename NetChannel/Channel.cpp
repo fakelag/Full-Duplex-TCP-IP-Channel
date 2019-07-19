@@ -309,7 +309,7 @@ CBaseNetChannel::~CBaseNetChannel()
 	{
 		freeaddrinfo( m_pSockAddr );
 		m_pSockAddr = NULL;
-}
+	}
 }
 
 bool CBaseNetChannel::Connect( const char* pszHost, int nPort )
@@ -468,8 +468,8 @@ void CBaseNetChannel::CloseConnection()
 	{
 		CRITICAL_SECTION_AUTOLOCK( m_hResourceLock );
 
-	if ( m_hSocket == INVALID_SOCKET )
-		return;
+		if ( m_hSocket == INVALID_SOCKET )
+			return;
 
 		if ( !m_bIsServer )
 		{
@@ -477,18 +477,18 @@ void CBaseNetChannel::CloseConnection()
 				return;
 		}
 
-	if ( m_bIsServer && m_pfnNotify )
-	{
+		if ( m_bIsServer && m_pfnNotify )
+		{
 #ifdef NET_NOTIFY_THREADLOCK
-		CRITICAL_SECTION_AUTOLOCK( g_hNotificationLock );
+			CRITICAL_SECTION_AUTOLOCK( g_hNotificationLock );
 #endif
 
-		m_pfnNotify( this, SV_CLIENTDISCONNECT );
-	}
+			m_pfnNotify( this, SV_CLIENTDISCONNECT );
+		}
 
 		// moved here
-	closesocket( m_hSocket );
-	m_hSocket = INVALID_SOCKET;
+		closesocket( m_hSocket );
+		m_hSocket = INVALID_SOCKET;
 
 		hNetworkThread = m_hNetworkThread;
 		dwNetworkThreadId = m_dwNetworkThreadId;
@@ -508,11 +508,11 @@ void CBaseNetChannel::CloseConnection()
 		CRITICAL_SECTION_AUTOLOCK( m_hResourceLock );
 		// moved from here (18.8.2018)
 
-	m_SendQueue.ReleaseQueue();
-	m_RecvQueue.ReleaseQueue();
+		m_SendQueue.ReleaseQueue();
+		m_RecvQueue.ReleaseQueue();
 
-	m_nIncomingSequenceNr = 0;
-	m_nOutgoingSequenceNr = 0;
+		m_nIncomingSequenceNr = 0;
+		m_nOutgoingSequenceNr = 0;
 		m_bHasValidatedProtocol = false;
 	}
 }
@@ -523,18 +523,18 @@ long CBaseNetChannel::ProcessIncoming()
 	if ( RecvInternal( &pRecv, NET_PAYLOAD_SIZE ) == -1 )
 	{
 		if( pRecv )
-		delete[] pRecv;
+			delete[] pRecv;
 
 		return -1;
 	}
 
 	if( pRecv )
-	delete[] pRecv;
+		delete[] pRecv;
 
 	{
 		CRITICAL_SECTION_AUTOLOCK( m_hResourceLock );
-	m_RecvQueue.ProcessMessages();
-	m_RecvQueue.ReleaseQueue();
+		m_RecvQueue.ProcessMessages();
+		m_RecvQueue.ReleaseQueue();
 	}
 
 	return m_nIncomingSequenceNr;
@@ -557,9 +557,9 @@ long CBaseNetChannel::ProcessOutgoing()
 
 	m_SendQueue.LockQueue();
 
-		if ( static_cast< int >( 2.0f * ( float ) ( m_nTickRate ) ) < m_nLastPingCycle )
-		{
-			CNETPing* pNETPing = new CNETPing( this );
+	if ( static_cast< int >( 2.0f * ( float ) ( m_nTickRate ) ) < m_nLastPingCycle )
+	{
+		CNETPing* pNETPing = new CNETPing( this );
 		m_SendQueue.AddMessage( pNETPing );
 	}
 
@@ -574,9 +574,9 @@ long CBaseNetChannel::ProcessOutgoing()
 		pData = new char[ NET_PAYLOAD_SIZE * nMsgCount ];
 		nDataLength = new int[ nMsgCount ];
 
-	for ( int i = 0; i < nMsgCount; ++i )
-	{
-		INetMessage* pNetMessage = m_SendQueue.GetMessageByIndex( i );
+		for ( int i = 0; i < nMsgCount; ++i )
+		{
+			INetMessage* pNetMessage = m_SendQueue.GetMessageByIndex( i );
 
 			char* pMessageData = ( char* ) ( pData + NET_PAYLOAD_SIZE * i );
 			nDataLength[ i ] = pNetMessage->Serialize( pMessageData, NET_PAYLOAD_SIZE );
@@ -594,10 +594,10 @@ long CBaseNetChannel::ProcessOutgoing()
 		{
 			m_nState = NET_SENDING;
 			if ( SendInternal( ( char* ) ( pData + NET_PAYLOAD_SIZE * i ), nDataLength[ i ] ) == -1 )
-		{
-			bTransmissionOK = false;
-			break;
-		}
+			{
+				bTransmissionOK = false;
+				break;
+			}
 		}
 	}
 
@@ -605,7 +605,7 @@ long CBaseNetChannel::ProcessOutgoing()
 		m_nLastPingCycle = 0;
 
 	if( pData )
-	delete[] pData;
+		delete[] pData;
 
 	if( nDataLength )
 		delete[] nDataLength;
@@ -685,7 +685,7 @@ long CBaseNetChannel::ProcessTransmissions()
 
 				nDataLeft -= nBytesSent;
 				nTotalBytesSent += nBytesSent;
-}
+			}
 
 			m_bIsActiveTransmission = false;
 		}
@@ -759,7 +759,7 @@ void CBaseNetChannel::SendNetData( char* pData, long nSize, const bf_write* pPro
 		delete[] pFileBuffer;
 		delete pDeltaTransmission;
 		return;
-}
+	}
 
 	if ( pProps )
 	{
@@ -779,7 +779,7 @@ void CBaseNetChannel::SendNetMessage( INetMessage* pNetMessage )
 		{
 			m_nFlags |= NET_DISCONNECT_BY_PROTOCOL;
 			CloseConnection();
-}
+		}
 	}
 }
 
@@ -790,7 +790,7 @@ void CBaseNetChannel::Disconnect( const char* pszReason )
 		CRITICAL_SECTION_AUTOLOCK( m_hResourceLock );
 		if ( pszReason && IsActiveSocket() && m_hSocket != INVALID_SOCKET )
 		{
-	strncpy( m_szDisconnectReason, pszReason, sizeof( m_szDisconnectReason ) );
+			strncpy( m_szDisconnectReason, pszReason, sizeof( m_szDisconnectReason ) );
 			pNETDisconnect = new CNETDisconnect( this, pszReason );
 		}
 	}
@@ -839,7 +839,7 @@ bool CBaseNetChannel::Reconnect()
 	if ( !m_bCanReconnect )
 		return false;
 	
-		if ( !m_bIsServer )
+	if ( !m_bIsServer )
 	{
 		if ( !IsActiveSocket() )
 			return Connect( m_szLastHostIP, m_nLastHostPort );
@@ -884,23 +884,23 @@ long CBaseNetChannel::RecvInternal( char** pBuf, unsigned long nSize )
 
 	if ( !m_bIsServer )
 	{
-	fd_set socket_set;
-	FD_ZERO( &socket_set );
-	FD_SET( m_hSocket, &socket_set );
+		fd_set socket_set;
+		FD_ZERO( &socket_set );
+		FD_SET( m_hSocket, &socket_set );
 
-	TIMEVAL timeout;
-	timeout.tv_sec = 0;
-	timeout.tv_usec = 500;
+		TIMEVAL timeout;
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 500;
 
-	switch ( select( 0, &socket_set, NULL, NULL, &timeout ) )
-	{
-	case 1:
-		break;
-	case SOCKET_ERROR:
-		return -1;
-	default:
-		return m_nIncomingSequenceNr;
-	}
+		switch ( select( 0, &socket_set, NULL, NULL, &timeout ) )
+		{
+		case 1:
+			break;
+		case SOCKET_ERROR:
+			return -1;
+		default:
+			return m_nIncomingSequenceNr;
+		}
 	}
 
 	m_nState = NET_RECEIVING;
@@ -1049,7 +1049,7 @@ long CBaseNetChannel::RecvInternal( char** pBuf, unsigned long nSize )
 					{
 						delete[] pFileBuffer;
 						delete pTransmissionHeader;
-				return -1;
+						return -1;
 					}
 
 					if ( m_TransmissionProxy )
@@ -1359,11 +1359,11 @@ bool NET_ProcessListenSocket( const char* pszPort, int nTickRate, ServerRunFrame
 
 		{
 			CRITICAL_SECTION_AUTOLOCK( g_hListenChannelLock );
-		int c = g_ListenChannels.size();
-		for ( int i = c - 1; i >= 0; --i )
-		{
+			int c = g_ListenChannels.size();
+			for ( int i = c - 1; i >= 0; --i )
+			{
 				if ( !g_ListenChannels[ i ]->IsConnected() )
-				NET_DestroyChannel( g_ListenChannels[ i ] );
+					NET_DestroyChannel( g_ListenChannels[ i ] );
 			}
 		}
 	}
@@ -1372,9 +1372,9 @@ bool NET_ProcessListenSocket( const char* pszPort, int nTickRate, ServerRunFrame
 
 	{
 		CRITICAL_SECTION_AUTOLOCK( g_hListenChannelLock );
-	int c = g_ListenChannels.size();
-	for ( int i = c - 1; i >= 0; --i )
-		NET_DestroyChannel( g_ListenChannels[ i ] );
+		int c = g_ListenChannels.size();
+		for ( int i = c - 1; i >= 0; --i )
+			NET_DestroyChannel( g_ListenChannels[ i ] );
 
 		g_ListenChannels.clear();
 	}
