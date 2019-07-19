@@ -10,9 +10,7 @@
 
 #pragma comment( lib, "Ws2_32.lib" )
 
-//#define NET_NOTIFY_THREADLOCK
-#define PACKET_STRICT_VALIDATION
-#define PACKET_HEADER_LENGTH 8
+class CBaseNetChannel;
 
 DWORD WINAPI NET_ProcessSocket( LPVOID lp );
 
