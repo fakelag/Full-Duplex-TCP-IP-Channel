@@ -74,25 +74,6 @@ const char *inet_ntop( int af, const void *src, char *dst, socklen_t size )
 
 DWORD WINAPI NET_ProcessSocket( LPVOID lp );
 
-class CCriticalSectionAutolock
-{
-public:
-	CCriticalSectionAutolock( void* hLock );
-	~CCriticalSectionAutolock();
-
-private:
-	void* m_hLock;
-};
-
-#define CRITICAL_SECTION_AUTOLOCK( hLock ) \
-CCriticalSectionAutolock CSAutoLock__##hLock##( &hLock );
-
-#define CRITICAL_SECTION_START( hLock ) \
-EnterCriticalSection( hLock );
-
-#define CRITICAL_SECTION_END( hLock ) \
-LeaveCriticalSection( hLock );
-
 enum channel_state_t
 {
 	NET_IDLE,

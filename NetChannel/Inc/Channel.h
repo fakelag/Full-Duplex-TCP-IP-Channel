@@ -33,6 +33,13 @@ private:
 #define CRITICAL_SECTION_AUTOLOCK( hLock ) \
 CCriticalSectionAutolock CSAutoLock__##hLock##( &hLock );
 
+#define CRITICAL_SECTION_START( hLock ) \
+EnterCriticalSection( hLock );
+
+#define CRITICAL_SECTION_END( hLock ) \
+LeaveCriticalSection( hLock );
+
+
 class INetMessage
 {
 public:
