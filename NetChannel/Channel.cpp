@@ -227,11 +227,14 @@ protected:
 	bool				m_bCanReconnect;
 
 	/* Server Reserved */
-	ServerConnectionNotifyFn	m_pfnNotify;
-	char						m_szDisconnectReason[ 128 ];
+	ServerConnectionNotifyFn			m_pfnNotify;
+	char								m_szDisconnectReason[ 128 ];
+	bool								m_bHasValidatedProtocol;
 
 	/* Handlers */
-	OnHandlerMessageReceivedFn	m_MessageHandler;
+	OnHandlerMessageReceivedFn			m_MessageHandler;
+	OnDataTransmissionProgressFn		m_TransmissionProxy;
+	INetIntermediateContext*			m_IntermediateProxy;
 };
 
 CCriticalSectionAutolock::CCriticalSectionAutolock( void* hLock )
