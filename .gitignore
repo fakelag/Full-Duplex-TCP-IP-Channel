@@ -3,6 +3,7 @@
 *.pdb
 *.ilk
 *.iobj
+*.ipdb
 *.obj
 *.idb
 *.lastbuildstate
