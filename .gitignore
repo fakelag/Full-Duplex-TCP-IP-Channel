@@ -1,5 +1,6 @@
 */.vs/*
 .vs/*
+/Bin/Debug/*
 *.pdb
 *.ilk
 *.iobj
