@@ -12,7 +12,9 @@
 
 class CBaseNetChannel;
 
-DWORD WINAPI NET_ProcessSocket( LPVOID lp );
+bool g_bIsNetInitialized = false;
+std::vector< CBaseNetChannel* > g_ListenChannels;
+CRITICAL_SECTION g_hListenChannelLock;
 
 #ifdef NET_NOTIFY_THREADLOCK
 CRITICAL_SECTION g_hNotificationLock;
