@@ -96,6 +96,52 @@ void CNETDisconnect::ProcessMessage()
 		pNetChannel->DisconnectInternal( this );
 }
 
+long CNETDataTransmission::GetHeaderPacketSize()
+{
+	return ( PACKET_MANIFEST_SIZE + MSG_TRANSMISSION_HEADER_SIZE ) + m_nPropsLength;
+}
+
+int CNETDataTransmission::Serialize( void* pBuf, unsigned long nSize )
+{
+	long* pData = ( long* ) CreateManifest( pBuf, nSize );
+
+	if ( !pData )
+		return -1;
+
+	m_nPropsLength = m_WriteProps.GetNumBytesWritten();
+
+	if ( nSize < ( unsigned long ) GetHeaderPacketSize() )
+		return -1;
+
+	pData[ 0 ] = m_nId;
+	pData[ 1 ] = m_nLength;
+	pData[ 2 ] = m_nPropsLength;
+
+	memcpy( &pData[ 3 ], m_WriteProps.GetData(), m_nPropsLength );
+	return GetHeaderPacketSize();
+}
+
+bool CNETDataTransmission::DeSerialize( void* pBuf, unsigned long nSize )
+{
+	long* pData = ( long* ) pBuf;
+
+	if ( nSize < MSG_TRANSMISSION_HEADER_SIZE + PACKET_MANIFEST_SIZE )
+		return false;
+
+	m_nId				= pData[ 0 ];
+	m_nLength			= pData[ 1 ];
+	m_nPropsLength		= pData[ 2 ];
+
+	if ( nSize != GetHeaderPacketSize() )
+		return false;
+
+	memcpy( m_Props, &pData[ 3 ], m_nPropsLength );
+	return true;
+}
+
+void CNETDataTransmission::ProcessMessage()
+{
+
 }
 
 int CNETHandlerMessage::Serialize( void* pBuf, unsigned long nSize )
