@@ -151,7 +151,7 @@ int CNETHandlerMessage::Serialize( void* pBuf, unsigned long nSize )
 	if ( !pData )
 		return -1;
 
-	if ( nSize < m_Write.GetNumBytesWritten() + 4 )
+	if ( nSize < m_Write.GetNumBytesWritten() + PACKET_MANIFEST_SIZE )
 		return -1;
 
 	memcpy( pData, m_Write.GetData(), m_Write.GetNumBytesWritten() );
