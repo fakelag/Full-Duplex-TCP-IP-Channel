@@ -117,30 +117,41 @@ public:
 	CBaseNetChannel();
 	~CBaseNetChannel();
 
+	bool				Connect( SOCKET hSocket );
 	bool				Connect( const char* pszHost, int nPort );
-	bool				InitFromSocket( SOCKET hSocket, ServerConnectionNotifyFn pfnNotify );
+	bool				InitFromSocket( SOCKET hSocket, DWORD dwNetworkThreadId, ServerConnectionNotifyFn pfnNotify );
 
 	void				CloseConnection();
 
+	void				SendNetData( char* pData, long nSize, const bf_write* pProps );
 	void				SendNetMessage( INetMessage* pNetMessage );
+	void				Transmit( INetMessage* pNetMessage = NULL );
 	void				Disconnect( const char* pszReason );
 	bool				Reconnect();
-	void				Transmit();
 
 	bool				ProcessSocket();
+	long				ProcessIncoming();
+	long				ProcessOutgoing();
 
-	bool				WaitForTransmit()					const;
 	int					GetTickRate()						const { return m_nTickRate; }
+	bool				IsSending()							const { return IsConnected() && ( m_nState == channel_state_t::NET_SENDING ); }
+	bool				IsReceiving()						const { return IsConnected() && ( m_nState == channel_state_t::NET_RECEIVING ); }
+	bool				IsActiveTransmission()				const { return m_bIsActiveTransmission; }
 	bool				IsConnected()						const { return ( m_hSocket != INVALID_SOCKET ); }
-	bool				IsActiveSocket()					const { return ( IsConnected() || m_hNetworkThread != INVALID_HANDLE_VALUE ); }
 	const char*			GetDisconnectReason()				const { return m_szDisconnectReason; }
 	const char*			GetHostIPString()					const { return m_szHostIP; }
 	unsigned long		GetHostIP()							const { return m_nHostIP; }
 	unsigned long		GetFlags()							const { return m_nFlags; }
-	int					GetOutgoingSequenceNr()				const { return m_nOutgoingSequenceNr; }
-	int					GetIncomingSequenceNr()				const { return m_nIncomingSequenceNr; }
+	long				GetOutgoingSequenceNr()				const { return m_nOutgoingSequenceNr; }
+	long				GetIncomingSequenceNr()				const { return m_nIncomingSequenceNr; }
+	long				GetTransferSequenceNr()				const { return m_nTransmissionSequenceNr; }
 	unsigned int		GetSocket()							const { return m_hSocket; }
+
+	void				SetOutgoingSequenceNr( long nSeq )	{ m_nOutgoingSequenceNr = nSeq; }
+	void				SetIncomingSequenceNr( long nSeq )	{ m_nIncomingSequenceNr = nSeq; }
 	void				SetTickRate( long nTickRate )		{ m_nTickRate = ( int ) nTickRate; }
+	void				SetFlags( unsigned long nFlags )	{ m_nFlags = nFlags; }
+	void				SetState( channel_state_t nState )	{ m_nState = nState;}
 
 	void				SetMessageHandler( OnHandlerMessageReceivedFn pfnHandler )
 	{
@@ -163,22 +174,26 @@ protected:
 	int					m_nLastPingCycle;
 	long				m_nOutgoingSequenceNr;
 	long				m_nIncomingSequenceNr;
+	long				m_nState;
 
 	/* Sockets */
 	SOCKET				m_hSocket;
+
+	DWORD				m_dwNetworkThreadId;
 	HANDLE				m_hNetworkThread;
 
-	CRITICAL_SECTION	m_hSendLock;
-	CRITICAL_SECTION	m_hRecvLock;
+	CRITICAL_SECTION	m_hResourceLock;
 
 	CNetMessageQueue	m_RecvQueue;
 	CNetMessageQueue	m_SendQueue;
 
 	unsigned long		m_nFlags;
+	unsigned long		m_nRecvBackupLength;
+	char*				m_pRecvBackup;
 
 	char				m_szHostIP[ 32 ];
 	unsigned long		m_nHostIP;
-	sockaddr_in			m_SockAddr;
+	addrinfo*			m_pSockAddr;
 
 	/* Reconnection data */
 	const char*			m_szLastHostIP;
@@ -215,38 +230,88 @@ CNetMessageQueue::~CNetMessageQueue()
 	DeleteCriticalSection( &m_hQueueLock );
 }
 
-CBaseNetChannel::CBaseNetChannel()
+CBaseNetChannel::CBaseNetChannel() : m_RecvQueue( this ), m_SendQueue( this )
 {
 	m_bIsServer = false;
 	m_bCanReconnect = false;
+	m_bHasValidatedProtocol = false;
+	m_bIsActiveTransmission = false;
 	m_nOutgoingSequenceNr = 0;
 	m_nIncomingSequenceNr = 0;
+	m_nTransmissionSequenceNr = 0;
+	m_dwNetworkThreadId = 0;
 	m_nLastPingCycle = 0;
 	m_hSocket = INVALID_SOCKET;
 	m_pfnNotify = NULL;
 	m_MessageHandler = NULL;
+	m_TransmissionProxy = NULL;
+	m_IntermediateProxy = NULL;
+	m_pSockAddr = NULL;
 	m_hNetworkThread = INVALID_HANDLE_VALUE;
 	m_nTickRate = 32;
 	m_nTimeout = 20000;
+	m_nState = NET_IDLE;
+
+	m_pRecvBackup = new char[ PACKET_BACKUP_LENGTH ];
+	m_nRecvBackupLength = 0;
+
+	m_nHostIP = 0;
+	m_szHostIP[ 0 ] = 0;
+	m_nFlags = 0;
+
 
 	strncpy( m_szDisconnectReason, "Connection lost", sizeof( m_szDisconnectReason ) );
 
-	InitializeCriticalSection( &m_hSendLock );
-	InitializeCriticalSection( &m_hRecvLock );
+	InitializeCriticalSection( &m_hResourceLock );
 }
 
 CBaseNetChannel::~CBaseNetChannel()
 {
-	DeleteCriticalSection( &m_hSendLock );
-	DeleteCriticalSection( &m_hRecvLock );
+	if( m_pRecvBackup )
+		delete[] m_pRecvBackup;
+
+	m_pRecvBackup = NULL;
+	DeleteCriticalSection( &m_hResourceLock );
+
+	if ( m_pSockAddr )
+	{
+		freeaddrinfo( m_pSockAddr );
+		m_pSockAddr = NULL;
+}
 }
 
 bool CBaseNetChannel::Connect( const char* pszHost, int nPort )
 {
-	m_nFlags = 0;
-	m_nLastPingCycle = 0;
-	m_bIsServer = false;
+	if ( IsActiveSocket() )
+		return false;
+
+	m_nFlags				= 0;
+	m_nLastPingCycle		= 0;
+	m_bIsServer				= false;
+	m_hNetworkThread		= INVALID_HANDLE_VALUE;
+
 	strncpy( m_szHostIP, pszHost, sizeof( m_szHostIP ) );
+
+	m_nRecvBackupLength = 0;
+	memset( m_pRecvBackup, 0, sizeof( char ) * PACKET_BACKUP_LENGTH );
+
+	addrinfo hints;
+	ZeroMemory( &hints, sizeof( hints ) );
+	hints.ai_family			= AF_INET;
+	hints.ai_socktype		= SOCK_STREAM;
+	hints.ai_protocol		= IPPROTO_TCP;
+
+	char szPort[ 32 ];
+	wsprintfA( szPort, "%i", nPort );
+
+	if ( m_pSockAddr )
+	{
+		freeaddrinfo( m_pSockAddr );
+		m_pSockAddr = NULL;
+	}
+
+	if ( getaddrinfo( pszHost, szPort, &hints, &m_pSockAddr ) )
+		return false;
 
 	in_addr addr_info;
 	inet_pton( AF_INET, pszHost, &addr_info );
@@ -256,14 +321,10 @@ bool CBaseNetChannel::Connect( const char* pszHost, int nPort )
 
 	BOOL nState = 1;
 	setsockopt( m_hSocket, IPPROTO_TCP, TCP_NODELAY, ( char * ) &nState, sizeof( nState ) );
-	setsockopt( m_hSocket, SOL_SOCKET, SO_SNDTIMEO, ( char * ) &m_nTimeout, sizeof( m_nTimeout ) );
 	setsockopt( m_hSocket, SOL_SOCKET, SO_RCVTIMEO, ( char * ) &m_nTimeout, sizeof( m_nTimeout ) );
+	setsockopt( m_hSocket, SOL_SOCKET, SO_SNDTIMEO, ( char * ) &m_nTimeout, sizeof( m_nTimeout ) );
 
-	m_SockAddr.sin_family			= AF_INET;
-	m_SockAddr.sin_addr.s_addr		= m_nHostIP;
-	m_SockAddr.sin_port				= htons( nPort );
-
-	if ( connect( m_hSocket, ( sockaddr* ) &m_SockAddr, sizeof( m_SockAddr ) ) )
+	if ( connect( m_hSocket, m_pSockAddr->ai_addr, m_pSockAddr->ai_addrlen ) )
 	{
 		m_hSocket = INVALID_SOCKET;
 		return false;
@@ -273,28 +334,77 @@ bool CBaseNetChannel::Connect( const char* pszHost, int nPort )
 	m_nLastHostPort = nPort;
 	m_bCanReconnect = true;
 
-	m_hNetworkThread = CreateThread( NULL, NULL, &NET_ProcessSocket, this, NULL, NULL );
+	m_hNetworkThread = CreateThread( NULL, NULL, &NET_ProcessSocket, this, NULL, &m_dwNetworkThreadId );
+
+	CCLCConnect* pClientConnect = new CCLCConnect( this );
+	Transmit( pClientConnect );
 
 	return true;
 }
 
-bool CBaseNetChannel::InitFromSocket( SOCKET hSocket, ServerConnectionNotifyFn pfnNotify )
+bool CBaseNetChannel::Connect( SOCKET hSocket )
 {
-	m_nFlags = 0;
-	m_nLastPingCycle = 0;
-	m_bIsServer = true;
-	m_hSocket = hSocket;
+	if ( IsActiveSocket() )
+		return false;
+
+	m_nFlags				= 0;
+	m_nLastPingCycle		= 0;
+	m_bIsServer				= false;
+	m_hNetworkThread		= INVALID_HANDLE_VALUE;
+	m_hSocket				= hSocket;
+
+	sockaddr_in addressinfo;
+	int nAddrSize = sizeof( addressinfo );
+
+	if ( getpeername( hSocket, ( sockaddr* ) &addressinfo, &nAddrSize ) == SOCKET_ERROR )
+		return false;
+
+	inet_ntop( AF_INET, &addressinfo.sin_addr, m_szHostIP, sizeof( m_szHostIP ) );
+	m_nHostIP = addressinfo.sin_addr.s_addr;
+
+	m_nRecvBackupLength = 0;
+	memset( m_pRecvBackup, 0, sizeof( char ) * PACKET_BACKUP_LENGTH );
 
 	BOOL nState = 1;
 	setsockopt( m_hSocket, IPPROTO_TCP, TCP_NODELAY, ( char * ) &nState, sizeof( nState ) );
-	setsockopt( m_hSocket, SOL_SOCKET, SO_SNDTIMEO, ( char * ) &m_nTimeout, sizeof( m_nTimeout ) );
 	setsockopt( m_hSocket, SOL_SOCKET, SO_RCVTIMEO, ( char * ) &m_nTimeout, sizeof( m_nTimeout ) );
+	setsockopt( m_hSocket, SOL_SOCKET, SO_SNDTIMEO, ( char * ) &m_nTimeout, sizeof( m_nTimeout ) );
 
-	int nAddrSize = sizeof( m_SockAddr );
-	getsockname( hSocket, ( sockaddr* ) &m_SockAddr, &nAddrSize );
+	m_szLastHostIP = m_szHostIP;
+	m_nLastHostPort = ntohs( addressinfo.sin_port );
+	m_bCanReconnect = true;
 
-	inet_ntop( AF_INET, &m_SockAddr.sin_addr, m_szHostIP, sizeof( m_szHostIP ) );
-	m_nHostIP = m_SockAddr.sin_addr.s_addr;
+	m_hNetworkThread = CreateThread( NULL, NULL, &NET_ProcessSocket, this, NULL, &m_dwNetworkThreadId );
+
+	CCLCConnect* pClientConnect = new CCLCConnect( this );
+	Transmit( pClientConnect );
+
+	return true;
+}
+
+bool CBaseNetChannel::InitFromSocket( SOCKET hSocket, DWORD dwNetworkThreadId, ServerConnectionNotifyFn pfnNotify )
+{
+	m_nFlags				= 0;
+	m_nLastPingCycle		= 0;
+	m_bIsServer				= true;
+	m_hNetworkThread		= INVALID_HANDLE_VALUE;
+	m_hSocket				= hSocket;
+
+	m_nRecvBackupLength = 0;
+	memset( m_pRecvBackup, 0, sizeof( char ) * PACKET_BACKUP_LENGTH );
+
+	BOOL nState = 1;
+	setsockopt( m_hSocket, IPPROTO_TCP, TCP_NODELAY, ( char * ) &nState, sizeof( nState ) );
+	setsockopt( m_hSocket, SOL_SOCKET, SO_RCVTIMEO, ( char * ) &m_nTimeout, sizeof( m_nTimeout ) );
+	setsockopt( m_hSocket, SOL_SOCKET, SO_SNDTIMEO, ( char * ) &m_nTimeout, sizeof( m_nTimeout ) );
+
+	sockaddr_in addressinfo;
+	int nAddrSize = sizeof( addressinfo );
+	if ( getpeername( hSocket, ( sockaddr* ) &addressinfo, &nAddrSize ) == SOCKET_ERROR )
+		return false;
+
+	inet_ntop( AF_INET, &addressinfo.sin_addr, m_szHostIP, sizeof( m_szHostIP ) );
+	m_nHostIP = addressinfo.sin_addr.s_addr;
 
 	{
 #ifdef NET_NOTIFY_THREADLOCK
@@ -310,7 +420,8 @@ bool CBaseNetChannel::InitFromSocket( SOCKET hSocket, ServerConnectionNotifyFn p
 		}
 	}
 
-	m_hNetworkThread = CreateThread( NULL, NULL, &NET_ProcessSocket, this, NULL, NULL );
+	//m_dwNetworkThreadId = dwNetworkThreadId;
+	m_hNetworkThread = CreateThread( NULL, NULL, &NET_ProcessSocket, this, NULL, &m_dwNetworkThreadId );
 
 	CSVCConnect* pSVCConnect = new CSVCConnect( this );
 	SendNetMessage( pSVCConnect );
@@ -320,8 +431,19 @@ bool CBaseNetChannel::InitFromSocket( SOCKET hSocket, ServerConnectionNotifyFn p
 
 void CBaseNetChannel::CloseConnection()
 {
+	HANDLE hNetworkThread = INVALID_HANDLE_VALUE;
+	DWORD dwNetworkThreadId = 0;
+	{
+		CRITICAL_SECTION_AUTOLOCK( m_hResourceLock );
+
 	if ( m_hSocket == INVALID_SOCKET )
 		return;
+
+		if ( !m_bIsServer )
+		{
+			if ( !IsActiveSocket() )
+				return;
+		}
 
 	if ( m_bIsServer && m_pfnNotify )
 	{
@@ -332,95 +454,238 @@ void CBaseNetChannel::CloseConnection()
 		m_pfnNotify( this, SV_CLIENTDISCONNECT );
 	}
 
+		// moved here
 	closesocket( m_hSocket );
 	m_hSocket = INVALID_SOCKET;
 
-	if ( m_hNetworkThread != INVALID_HANDLE_VALUE )
+		hNetworkThread = m_hNetworkThread;
+		dwNetworkThreadId = m_dwNetworkThreadId;
+	}
+
+	if ( hNetworkThread != INVALID_HANDLE_VALUE && dwNetworkThreadId != GetCurrentThreadId() )
 	{
-		if ( GetThreadId( m_hNetworkThread ) != GetCurrentThreadId() )
+		if ( WaitForSingleObject( hNetworkThread, 4000 ) == WAIT_TIMEOUT )
 		{
-			if ( WaitForSingleObject( m_hNetworkThread, 2000 ) == WAIT_TIMEOUT )
-				TerminateThread( m_hNetworkThread, 0 );
+			OutputDebugStringA( "Terminating thread: waiting timed out!" );
+			TerminateThread( hNetworkThread, 0 );
 		}
 	}
+
+
+	{
+		CRITICAL_SECTION_AUTOLOCK( m_hResourceLock );
+		// moved from here (18.8.2018)
 
 	m_SendQueue.ReleaseQueue();
 	m_RecvQueue.ReleaseQueue();
 
 	m_nIncomingSequenceNr = 0;
 	m_nOutgoingSequenceNr = 0;
-	m_hNetworkThread = INVALID_HANDLE_VALUE;
+		m_bHasValidatedProtocol = false;
+	}
 }
 
 long CBaseNetChannel::ProcessIncoming()
 {
-	CRITICAL_SECTION_AUTOLOCK( m_hRecvLock );
-
-	char* pRecv = new char[ NET_BUFFER_SIZE ];
-
-	if ( RecvInternal( pRecv, NET_BUFFER_SIZE ) == -1 )
+	char* pRecv = NULL;
+	if ( RecvInternal( &pRecv, NET_PAYLOAD_SIZE ) == -1 )
 	{
+		if( pRecv )
 		delete[] pRecv;
+
 		return -1;
 	}
 
+	if( pRecv )
 	delete[] pRecv;
 
+	{
+		CRITICAL_SECTION_AUTOLOCK( m_hResourceLock );
 	m_RecvQueue.ProcessMessages();
 	m_RecvQueue.ReleaseQueue();
+	}
+
 	return m_nIncomingSequenceNr;
 }
 
 long CBaseNetChannel::ProcessOutgoing()
 {
-	CRITICAL_SECTION_AUTOLOCK( m_hSendLock );
+	CRITICAL_SECTION_AUTOLOCK( m_hResourceLock );
+
+	/* Process File Transmissions */
+	switch ( ProcessTransmissions() )
+	{
+	case 0:
+		break;
+	case 1:
+		return -1;
+	default:
+		return m_nOutgoingSequenceNr;
+	}
 
 	m_SendQueue.LockQueue();
 
-	char* pData = new char[ NET_BUFFER_SIZE ];
-
-	if ( !m_bIsServer )
-	{
 		if ( static_cast< int >( 2.0f * ( float ) ( m_nTickRate ) ) < m_nLastPingCycle )
 		{
 			CNETPing* pNETPing = new CNETPing( this );
-			SendNetMessage( pNETPing );
+		m_SendQueue.AddMessage( pNETPing );
+	}
+
+	char* pData = NULL;
+	int* nDataLength = NULL;
+
+	bool bTransmissionOK = true;
+	int nMsgCount = m_SendQueue.GetMessageCount();
+
+	if ( nMsgCount )
+	{
+		pData = new char[ NET_PAYLOAD_SIZE * nMsgCount ];
+		nDataLength = new int[ nMsgCount ];
+
+	for ( int i = 0; i < nMsgCount; ++i )
+	{
+		INetMessage* pNetMessage = m_SendQueue.GetMessageByIndex( i );
+
+			char* pMessageData = ( char* ) ( pData + NET_PAYLOAD_SIZE * i );
+			nDataLength[ i ] = pNetMessage->Serialize( pMessageData, NET_PAYLOAD_SIZE );
+
+			if ( m_IntermediateProxy )
+				m_IntermediateProxy->ProcessOutgoing( ( char* ) ( pMessageData + PACKET_MANIFEST_SIZE ), nDataLength[ i ] - PACKET_MANIFEST_SIZE );
 		}
 	}
 
-	bool bTransmissionOK = true;
+	m_SendQueue.UnLockQueue();
+
+	for ( int i = 0; i < nMsgCount; ++i )
+	{
+		if ( pData && nDataLength && nDataLength[ i ] > 0 )
+		{
+			m_nState = NET_SENDING;
+			if ( SendInternal( ( char* ) ( pData + NET_PAYLOAD_SIZE * i ), nDataLength[ i ] ) == -1 )
+		{
+			bTransmissionOK = false;
+			break;
+		}
+		}
+	}
+
+	if( nMsgCount )
+		m_nLastPingCycle = 0;
+
+	if( pData )
+	delete[] pData;
+
+	if( nDataLength )
+		delete[] nDataLength;
+
+	m_SendQueue.ReleaseQueue();
+	return ( bTransmissionOK ? m_nOutgoingSequenceNr : -1 );
+}
+
+long CBaseNetChannel::ProcessTransmissions()
+{
+	m_SendQueue.LockQueue();
+
+	char* pHeaderData = NULL;
+	char* pFileData = NULL;
+
+	long nFileLength = 0;
+	long nHeaderLength = 0;
+
+	std::vector< int > RemoveQueue;
+
 	int nMsgCount = m_SendQueue.GetMessageCount();
 	for ( int i = 0; i < nMsgCount; ++i )
 	{
 		INetMessage* pNetMessage = m_SendQueue.GetMessageByIndex( i );
-		int nSerialized = pNetMessage->Serialize( pData, NET_BUFFER_SIZE );
 
-		if ( nSerialized <= 0 )
+		if ( pNetMessage->GetType() != net_Transfer )
 			continue;
 
-		if ( SendInternal( pData, nSerialized ) == -1 )
+		CNETDataTransmission* pHeaderMsg = static_cast< CNETDataTransmission* >( pNetMessage );
+		nFileLength = pHeaderMsg->GetTransmissionLength();
+
+		if ( nFileLength <= 0 )
 		{
-			m_SendQueue.UnLockQueue();
-			bTransmissionOK = false;
-			break;
+			RemoveQueue.push_back( i );
+			continue;
 		}
 
-		m_nLastPingCycle = 0;
+		pHeaderData = new char[ NET_PAYLOAD_SIZE ];
+		nHeaderLength = pNetMessage->Serialize( pHeaderData, NET_PAYLOAD_SIZE );
+
+		if ( m_IntermediateProxy )
+			m_IntermediateProxy->ProcessOutgoing( ( char* )( pHeaderData + PACKET_MANIFEST_SIZE ), nHeaderLength - PACKET_MANIFEST_SIZE );
+
+		if ( nHeaderLength > 0 )
+			pFileData = pHeaderMsg->GetTransmissionData();
+
+		RemoveQueue.push_back( i );
+		break;
 	}
 
-	delete[] pData;
-
-	m_SendQueue.ReleaseQueue();
 	m_SendQueue.UnLockQueue();
-	return ( bTransmissionOK ? m_nOutgoingSequenceNr : -1 );
+
+	long nTransmissionId = 0;
+	if ( pHeaderData && nHeaderLength > 0 )
+	{
+		m_nState = NET_SENDING;
+
+		if ( pFileData && SendInternal( pHeaderData, nHeaderLength ) != -1 )
+		{
+			/* Start Transfering... */
+			nTransmissionId = m_nTransmissionSequenceNr + 1;
+
+			m_bIsActiveTransmission = true;
+
+			int nDataLeft = nFileLength;
+			int nTotalBytesSent = 0;
+
+			while ( nDataLeft > 0 )
+			{
+				int nBytesSent = send( m_hSocket, ( char* ) pFileData + nTotalBytesSent, min( nDataLeft, PACKET_TRANSFER_MTU ), 0 );
+				
+				if ( nBytesSent == SOCKET_ERROR )
+				{
+					nTransmissionId = -1;
+					break;
+				}
+
+				nDataLeft -= nBytesSent;
+				nTotalBytesSent += nBytesSent;
+}
+
+			m_bIsActiveTransmission = false;
+		}
+		else
+		{
+			nTransmissionId = -1;
+		}
+	}
+
+	m_SendQueue.LockQueue();
+
+	nMsgCount = RemoveQueue.size();
+	for ( int i = 0; i < nMsgCount; ++i )
+		m_SendQueue.RemoveMessage( RemoveQueue[ i ] );
+
+	m_SendQueue.UnLockQueue();
+
+
+	if( pHeaderData )
+		delete[] pHeaderData;
+
+	if ( pFileData )
+		delete[] pFileData;
+
+	return nTransmissionId;
 }
 
 bool CBaseNetChannel::ProcessSocket()
 {
-	if ( !IsConnected() )
-		return false;
+	m_nState = NET_IDLE;
 
-	if ( m_hNetworkThread == INVALID_HANDLE_VALUE )
+	if ( !IsConnected() )
 		return false;
 
 	++m_nLastPingCycle;
@@ -428,7 +693,7 @@ bool CBaseNetChannel::ProcessSocket()
 	int nIncomingSequenceNr = m_nIncomingSequenceNr;
 	int nSequenceNumber = ProcessIncoming();
 
-	if ( nSequenceNumber != -1 && nSequenceNumber == nIncomingSequenceNr )
+	if ( nSequenceNumber != -1 && !m_bIsServer && IsConnected() )
 	{
 		/* No packets were received this frame */
 		nSequenceNumber = ProcessOutgoing();
@@ -440,34 +705,98 @@ bool CBaseNetChannel::ProcessSocket()
 		return false;
 	}
 
-	return true;
+	return IsConnected();
 }
 
-bool CBaseNetChannel::WaitForTransmit() const
+void CBaseNetChannel::SendNetData( char* pData, long nSize, const bf_write* pProps )
 {
-	int nLastOutgoingSequenceNr = m_nOutgoingSequenceNr;
+	if ( nSize <= 0 )
+		return;
 
-	while ( m_nOutgoingSequenceNr == nLastOutgoingSequenceNr && IsConnected() )
-		Sleep( 150 );
+	int nTransmissionId = ++m_nTransmissionSequenceNr;
 
-	return true;
+	CNETDataTransmission* pDeltaTransmission = new CNETDataTransmission( this );
+
+	char* pFileBuffer = new char[ nSize ];
+	memcpy( pFileBuffer, pData, nSize );
+
+	pDeltaTransmission->SetTransmissionId( nTransmissionId );
+	if ( !pDeltaTransmission->Init( pFileBuffer, nSize ) )
+	{
+		printf( "Unable to init delta transmission: Deleting payload!\n" );
+		delete[] pFileBuffer;
+		delete pDeltaTransmission;
+		return;
+}
+
+	if ( pProps )
+	{
+		pDeltaTransmission->WriteProps( ( char* ) pProps->GetData(), pProps->GetNumBytesWritten() );
+	}
+
+	SendNetMessage( pDeltaTransmission );
 }
 
 void CBaseNetChannel::SendNetMessage( INetMessage* pNetMessage )
 {
 	m_SendQueue.AddMessage( pNetMessage );
+
+	if ( m_bIsServer )
+	{
+		if ( ProcessOutgoing() == -1 )
+		{
+			m_nFlags |= NET_DISCONNECT_BY_PROTOCOL;
+			CloseConnection();
+}
+	}
 }
 
 void CBaseNetChannel::Disconnect( const char* pszReason )
 {
+	CNETDisconnect* pNETDisconnect = NULL;
+	{
+		CRITICAL_SECTION_AUTOLOCK( m_hResourceLock );
+		if ( pszReason && IsActiveSocket() && m_hSocket != INVALID_SOCKET )
+		{
 	strncpy( m_szDisconnectReason, pszReason, sizeof( m_szDisconnectReason ) );
+			pNETDisconnect = new CNETDisconnect( this, pszReason );
+		}
+	}
 
-	CNETDisconnect* pNETDisconnect = new CNETDisconnect( this, pszReason );
-	SendNetMessage( pNETDisconnect );
-
-	Transmit();
+	if( pNETDisconnect )
+		Transmit( pNETDisconnect );
 
 	CloseConnection();
+}
+
+void CBaseNetChannel::Transmit( INetMessage* pNetMessage )
+{
+	if ( m_dwNetworkThreadId == GetCurrentThreadId() )
+	{
+		if( pNetMessage )
+			SendNetMessage( pNetMessage );
+
+		if( !m_bIsServer )
+			ProcessOutgoing();
+	}
+	else
+	{
+		if ( !m_bIsServer )
+		{
+			long nLastOutgoingSequenceNr = m_nOutgoingSequenceNr;
+
+			if ( pNetMessage )
+				SendNetMessage( pNetMessage );
+
+			while ( m_nOutgoingSequenceNr == nLastOutgoingSequenceNr && IsConnected() )
+				Sleep( 150 );
+		}
+		else
+		{
+			if ( pNetMessage )
+				SendNetMessage( pNetMessage );
+		}
+	}
 }
 
 bool CBaseNetChannel::Reconnect()
@@ -478,39 +807,28 @@ bool CBaseNetChannel::Reconnect()
 	if ( !m_bCanReconnect )
 		return false;
 	
-	if ( m_hNetworkThread == INVALID_HANDLE_VALUE )
-	{
 		if ( !m_bIsServer )
+	{
+		if ( !IsActiveSocket() )
 			return Connect( m_szLastHostIP, m_nLastHostPort );
 	}
 
 	return false;
 }
 
-void CBaseNetChannel::Transmit()
-{
-	if ( GetThreadId( m_hNetworkThread ) == GetCurrentThreadId() )
-	{
-		ProcessOutgoing();
-	}
-	else
-	{
-		WaitForTransmit();
-	}
-}
-
-void CBaseNetChannel::DisconnectInternal( const char* pszReason )
+void CBaseNetChannel::DisconnectInternal( CNETDisconnect* pNetDisconnect )
 {
 	m_nFlags |= NET_DISCONNECT_BY_HOST;
-	strncpy( m_szDisconnectReason, pszReason, sizeof( m_szDisconnectReason ) );
+	strncpy( m_szDisconnectReason, pNetDisconnect->GetDisconnectReason(), sizeof( m_szDisconnectReason ) );
+
+	if ( m_MessageHandler )
+		m_MessageHandler( this, pNetDisconnect );
+
 	CloseConnection();
 }
 
 long CBaseNetChannel::SendInternal( void* pBuf, unsigned long nSize )
 {
-	if ( !IsConnected() )
-		return -1;
-
 	/* Create Header */
 	char* pMsg = new char[ nSize + PACKET_HEADER_LENGTH ];
 	( ( long* ) pMsg )[ 0 ] = m_nOutgoingSequenceNr;
@@ -525,16 +843,15 @@ long CBaseNetChannel::SendInternal( void* pBuf, unsigned long nSize )
 	}
 
 	delete[] pMsg;
-	return m_nOutgoingSequenceNr++;
+	return ++m_nOutgoingSequenceNr;
 }
 
-long CBaseNetChannel::RecvInternal( void* pBuf, unsigned long nSize )
+long CBaseNetChannel::RecvInternal( char** pBuf, unsigned long nSize )
 {
-	if ( !IsConnected() )
-		return -1;
-
 	/* Check socket state */
 
+	if ( !m_bIsServer )
+	{
 	fd_set socket_set;
 	FD_ZERO( &socket_set );
 	FD_SET( m_hSocket, &socket_set );
@@ -552,31 +869,69 @@ long CBaseNetChannel::RecvInternal( void* pBuf, unsigned long nSize )
 	default:
 		return m_nIncomingSequenceNr;
 	}
+	}
+
+	m_nState = NET_RECEIVING;
 
 	/* Fetch the recv buffer */
+	( *pBuf ) = new char[ nSize + m_nRecvBackupLength ];
+	memcpy( ( *pBuf ), m_pRecvBackup, m_nRecvBackupLength );
 
-	int nReceived = recv( m_hSocket, ( char* ) pBuf, nSize, 0 );
+	int nReceived = recv( m_hSocket, ( ( *pBuf ) + m_nRecvBackupLength ), nSize, 0 );
 
 	if ( nReceived <= 0 )
 		return -1;
 
+	CRITICAL_SECTION_AUTOLOCK( m_hResourceLock );
+
+	long nPreviousRecvLength = m_nRecvBackupLength;
+
+	memset( m_pRecvBackup, 0, sizeof( char ) * PACKET_BACKUP_LENGTH );
+	m_nRecvBackupLength = 0;
+
 	long nBytesSerialized = 0, nPacketsSerialized = 0;
-	while ( nBytesSerialized < nReceived )
+	while ( ( nBytesSerialized - nPreviousRecvLength ) < nReceived )
 	{
-		char* pData = ( char* ) pBuf + nBytesSerialized;
+		char* pData = ( char* ) ( *pBuf ) + nBytesSerialized;
+
+		long nDeltaBytes = ( nReceived - ( nBytesSerialized - nPreviousRecvLength ) );
+		if ( nDeltaBytes < ( long )( PACKET_HEADER_LENGTH + PACKET_MANIFEST_SIZE ) )
+		{
+			memcpy( m_pRecvBackup, pData, nDeltaBytes );
+			m_nRecvBackupLength = nDeltaBytes;
+
+			return m_nIncomingSequenceNr;
+		}
 
 		int nType = -1;
-		long nLength = ProcessPacketHeader( pData, nReceived, &nType );
+		long nLength = ProcessPacketHeader( pData, nDeltaBytes, &nType );
 
 		if ( nLength <= 0 )
 			return -1;
 
-		if ( nLength >= nReceived )
+		if ( nDeltaBytes < nLength + PACKET_HEADER_LENGTH )
+		{
+			memcpy( m_pRecvBackup, pData, nDeltaBytes );
+			m_nRecvBackupLength = nDeltaBytes;
+
+			return --m_nIncomingSequenceNr;
+		}
+
+		if ( nLength + PACKET_HEADER_LENGTH > nReceived + nPreviousRecvLength )
 			return -1;
 
-		/* DeSerialize */
+		if ( m_bIsServer )
+		{
+			if ( !m_bHasValidatedProtocol && nType != clc_Connect )
+				return -1;
+		}
 
 		char* pMessage = ( char* ) pData + PACKET_HEADER_LENGTH + PACKET_MANIFEST_SIZE;
+
+		if ( m_IntermediateProxy )
+			m_IntermediateProxy->ProcessIncoming( pMessage, nLength - PACKET_MANIFEST_SIZE );
+
+		/* DeSerialize */
 		INetMessage* pNetMessage = NULL;
 
 		switch ( nType )
@@ -586,7 +941,10 @@ long CBaseNetChannel::RecvInternal( void* pBuf, unsigned long nSize )
 			pNetMessage = new CNETPing( this );
 
 			if ( !pNetMessage->DeSerialize( pMessage, nLength ) )
+			{
+				delete pNetMessage;
 				return -1;
+			}
 
 			break;
 		}
@@ -595,7 +953,10 @@ long CBaseNetChannel::RecvInternal( void* pBuf, unsigned long nSize )
 			pNetMessage = new CNETDisconnect( this );
 
 			if ( !pNetMessage->DeSerialize( pMessage, nLength ) )
+			{
+				delete pNetMessage;
 				return -1;
+			}
 
 			break;
 		}
@@ -604,8 +965,78 @@ long CBaseNetChannel::RecvInternal( void* pBuf, unsigned long nSize )
 			pNetMessage = new CNETHandlerMessage( this );
 
 			if ( !pNetMessage->DeSerialize( pMessage, nLength ) )
+			{
+				delete pNetMessage;
 				return -1;
+			}
 
+			break;
+		}
+		case net_Transfer:
+		{
+			CNETDataTransmission* pTransmissionHeader = new CNETDataTransmission( this );
+
+			if ( !pTransmissionHeader->DeSerialize( pMessage, nLength ) )
+			{
+				delete pTransmissionHeader;
+				return -1;
+			}
+
+			/*
+				Transfer block begin	=> pMessage + pTransmissionHeader->GetHeaderPacketSize() - PACKET_MANIFEST_SIZE;
+				Transfer block size		=> min( nDataLeft, nTransmissionDelta )
+			*/
+
+			long nMessageOffset					= ( pTransmissionHeader->GetHeaderPacketSize() - PACKET_MANIFEST_SIZE );
+			char* pTransmissionData				= ( pMessage + nMessageOffset );
+
+			long nDataLeft						= pTransmissionHeader->GetTransmissionLength();
+			long nDataLength					= nDataLeft;
+
+			long nTransmissionDelta				= ( nReceived - ( nBytesSerialized + ( nMessageOffset ) + ( PACKET_MANIFEST_SIZE + PACKET_HEADER_LENGTH ) ) );
+			long nAbsTransmissionBlock			= min( nDataLeft, nTransmissionDelta );
+
+			if ( m_TransmissionProxy )
+			{
+				bf_read& msg_props = pTransmissionHeader->ReadProps();
+				m_TransmissionProxy( ( void* ) msg_props.GetData(), msg_props.GetNumBytesLeft(), nAbsTransmissionBlock, nDataLength );
+			}
+
+			char* pFileBuffer = new char[ nDataLength ];
+			if ( pTransmissionHeader->Init( pFileBuffer, nDataLength ) )
+			{
+				memcpy( pFileBuffer, pTransmissionData, nAbsTransmissionBlock );
+
+				nDataLeft -= nAbsTransmissionBlock;
+
+				while ( nDataLeft > 0 )
+				{
+					int nDeltaTransfer = recv( m_hSocket, ( char * ) pFileBuffer + ( nDataLength - nDataLeft ), min( nDataLeft, PACKET_TRANSFER_MTU ), 0 );
+
+					if ( nDeltaTransfer <= 0 )
+					{
+						delete[] pFileBuffer;
+						delete pTransmissionHeader;
+				return -1;
+					}
+
+					if ( m_TransmissionProxy )
+					{
+						bf_read& msg_props = pTransmissionHeader->ReadProps();
+						m_TransmissionProxy( ( void* ) msg_props.GetData(), msg_props.GetNumBytesLeft(), ( nDataLength - nDataLeft ), nDataLength );
+					}
+
+					nDataLeft -= nDeltaTransfer;
+				}
+			}
+
+			if ( m_MessageHandler )
+				m_MessageHandler( this, pTransmissionHeader );
+
+			nBytesSerialized += nAbsTransmissionBlock;
+
+			delete[] pFileBuffer;
+			delete pTransmissionHeader;
 			break;
 		}
 		default:
@@ -615,12 +1046,29 @@ long CBaseNetChannel::RecvInternal( void* pBuf, unsigned long nSize )
 				switch ( nType )
 				{
 				case clc_Connect:
-					pNetMessage = new CCLCConnect( this );
+				{
+					CCLCConnect* pCLCConnect = new CCLCConnect( this );
 
-					if ( !pNetMessage->DeSerialize( pMessage, nLength ) )
+					if ( !pCLCConnect->DeSerialize( pMessage, nLength ) )
+					{
+						delete pCLCConnect;
 						return -1;
+					}
 
+					long nProtoVersion = static_cast< CCLCConnect* >( pCLCConnect )->GetProtocolVersion();
+					long nProtoUid = static_cast< CCLCConnect* >( pCLCConnect )->GetProtocolUid();
+
+					m_bHasValidatedProtocol = ( nProtoVersion == ( NET_PROTOCOL_VERSION ^ NET_PROTOCOL_MASK ) ) && ( nProtoUid == NET_PROTOCOL_UID );
+
+					if ( !m_bHasValidatedProtocol )
+					{
+						delete pCLCConnect;
+						return -1;
+					}
+
+					delete pCLCConnect;
 					break;
+				}
 				default:
 					return -1;
 				}
@@ -633,7 +1081,10 @@ long CBaseNetChannel::RecvInternal( void* pBuf, unsigned long nSize )
 					pNetMessage = new CSVCConnect( this );
 
 					if ( !pNetMessage->DeSerialize( pMessage, nLength ) )
+					{
+						delete pNetMessage;
 						return -1;
+					}
 
 					break;
 				default:
@@ -649,6 +1100,7 @@ long CBaseNetChannel::RecvInternal( void* pBuf, unsigned long nSize )
 			m_RecvQueue.AddMessage( pNetMessage );
 
 		nBytesSerialized += nLength + PACKET_HEADER_LENGTH;
+
 		++nPacketsSerialized;
 	}
 
